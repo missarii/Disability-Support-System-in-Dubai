@@ -1,0 +1,12 @@
+package ae.gov.pod.enums;
+
+public enum NotificationType {
+    APPLICATION_SUBMITTED,
+    APPLICATION_APPROVED,
+    APPLICATION_REJECTED,
+    BENEFIT_USED,
+    DOCUMENT_UPLOADED,
+    PASSWORD_RESET,
+    ACCOUNT_CREATED,
+    SYSTEM_ALERT
+}

@@ -1,0 +1,155 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: pod-platform
+
+  # ─── PostgreSQL ────────────────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:pod_db}
+    username: ${DB_USER:pod_user}
+    password: ${DB_PASS:pod_pass}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: POD-HikariPool
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+
+  # ─── Redis / Redisson ─────────────────────────────────────────
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASS:}
+
+  # ─── Kafka ───────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: pod-platform-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "ae.gov.pod.event"
+    listener:
+      concurrency: 5
+      ack-mode: manual_immediate
+
+  # ─── Mail ────────────────────────────────────────────────────
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USER:noreply@pod.gov.ae}
+    password: ${MAIL_PASS:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+  # ─── Static Resources (serve React dist) ─────────────────────
+  web:
+    resources:
+      static-locations: classpath:/static/
+      cache:
+        period: 86400
+
+# ─── JWT ─────────────────────────────────────────────────────────
+jwt:
+  secret: ${JWT_SECRET:POD_SECRET_KEY_MINIMUM_256_BITS_LONG_FOR_HS512_ALGO_2024}
+  expiration-ms: 86400000        # 24 hours
+  refresh-expiration-ms: 604800000  # 7 days
+
+# ─── ClickHouse ──────────────────────────────────────────────────
+clickhouse:
+  url: jdbc:clickhouse://${CH_HOST:localhost}:${CH_PORT:8123}/${CH_DB:pod_analytics}
+  username: ${CH_USER:default}
+  password: ${CH_PASS:}
+
+# ─── Thread Pool Config ──────────────────────────────────────────
+thread-pool:
+  application-processor:
+    core-size: 10
+    max-size: 50
+    queue-capacity: 500
+    thread-name-prefix: AppProcessor-
+  notification:
+    core-size: 5
+    max-size: 20
+    queue-capacity: 200
+    thread-name-prefix: Notifier-
+  analytics:
+    core-size: 3
+    max-size: 10
+    queue-capacity: 100
+    thread-name-prefix: Analytics-
+
+# ─── Rate Limiting ───────────────────────────────────────────────
+rate-limit:
+  max-requests: 5
+  window-seconds: 60
+
+# ─── Resilience4j ────────────────────────────────────────────────
+resilience4j:
+  circuitbreaker:
+    instances:
+      clickhouseService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+      notificationService:
+        registerHealthIndicator: true
+        slidingWindowSize: 5
+        failureRateThreshold: 60
+  retry:
+    instances:
+      clickhouseService:
+        maxAttempts: 3
+        waitDuration: 1s
+
+# ─── Actuator / Prometheus ───────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,env
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# ─── Logging ─────────────────────────────────────────────────────
+logging:
+  level:
+    ae.gov.pod: DEBUG
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
