@@ -43,9 +43,12 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       acks: all
-      retries: 3
+      retries: 0
       properties:
-        enable.idempotence: true
+        enable.idempotence: false
+        delivery.timeout.ms: 3000
+        request.timeout.ms: 2000
+        max.block.ms: 2000
     consumer:
       group-id: pod-platform-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer

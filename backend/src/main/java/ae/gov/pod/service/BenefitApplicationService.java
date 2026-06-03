@@ -11,13 +11,13 @@ import ae.gov.pod.repository.BenefitRepository;
 import ae.gov.pod.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -27,95 +27,93 @@ public class BenefitApplicationService {
     private final BenefitApplicationRepository applicationRepository;
     private final UserRepository userRepository;
     private final BenefitRepository benefitRepository;
-    private final RedissonClient redissonClient;
     private final KafkaProducerService kafkaProducerService;
+
+    // In-memory deduplication to prevent concurrent duplicate submissions
+    private final Set<String> activeSubmissions =
+            Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     @Transactional
     public BenefitApplication applyForBenefit(Long userId, Long benefitId, String reason) {
-        String lockKey = "lock:user:apply:" + userId + ":" + benefitId;
-        RLock lock = redissonClient.getLock(lockKey);
+        String dedupKey = "apply:" + userId + ":" + benefitId;
+
+        if (!activeSubmissions.add(dedupKey)) {
+            throw new RuntimeException("Application already in progress. Please wait.");
+        }
 
         try {
-            // Wait 5 seconds for lock, hold for 10 seconds
-            if (lock.tryLock(5, 10, TimeUnit.SECONDS)) {
-                
-                User user = userRepository.findById(userId)
-                        .orElseThrow(() -> new RuntimeException("User not found"));
-                Benefit benefit = benefitRepository.findById(benefitId)
-                        .orElseThrow(() -> new RuntimeException("Benefit not found"));
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+            Benefit benefit = benefitRepository.findById(benefitId)
+                    .orElseThrow(() -> new RuntimeException("Benefit not found"));
 
-                // Idempotency / Duplicate check
-                boolean alreadyApplied = applicationRepository.findByApplicantId(userId).stream()
-                        .anyMatch(app -> app.getBenefit().getId().equals(benefitId) && 
-                                  (app.getStatus() == ApplicationStatus.PENDING || app.getStatus() == ApplicationStatus.APPROVED));
-                
-                if (alreadyApplied) {
-                    throw new RuntimeException("Already applied or have an active benefit of this type");
-                }
+            // DB-level idempotency check
+            boolean alreadyApplied = applicationRepository.findByApplicantId(userId).stream()
+                    .anyMatch(app -> app.getBenefit().getId().equals(benefitId) &&
+                              (app.getStatus() == ApplicationStatus.PENDING ||
+                               app.getStatus() == ApplicationStatus.APPROVED));
 
-                BenefitApplication application = BenefitApplication.builder()
-                        .applicant(user)
-                        .benefit(benefit)
-                        .reasonForApplying(reason)
-                        .status(ApplicationStatus.PENDING)
-                        .build();
+            if (alreadyApplied) {
+                throw new RuntimeException("Already applied or have an active benefit of this type");
+            }
 
-                BenefitApplication savedApp = applicationRepository.save(application);
+            BenefitApplication application = BenefitApplication.builder()
+                    .applicant(user)
+                    .benefit(benefit)
+                    .reasonForApplying(reason)
+                    .status(ApplicationStatus.PENDING)
+                    .build();
 
-                // Send Kafka Event
+            BenefitApplication savedApp = applicationRepository.save(application);
+
+            // Kafka event — non-fatal if broker unavailable
+            try {
                 kafkaProducerService.sendApplicationEvent(ApplicationEvent.builder()
                         .applicationId(savedApp.getId())
                         .referenceNumber(savedApp.getReferenceNumber())
                         .applicantId(userId)
                         .eventType("APPLICATION_SUBMITTED")
                         .build());
-
-                // Trigger Async Processing
-                processApplicationAsync(savedApp.getId());
-
-                return savedApp;
-
-            } else {
-                throw new RuntimeException("Could not acquire lock for application submission. Please try again.");
+            } catch (Exception kafkaEx) {
+                log.warn("Kafka event failed (non-fatal): {}", kafkaEx.getMessage());
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Application submission interrupted");
+
+            // Async eligibility processing
+            processApplicationAsync(savedApp.getId());
+
+            return savedApp;
+
         } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            activeSubmissions.remove(dedupKey);
         }
     }
 
     @Async("applicationProcessorExecutor")
     public void processApplicationAsync(Long applicationId) {
-        log.info("Processing application async in thread: {}", Thread.currentThread().getName());
-        
+        log.info("Processing application async: {}", applicationId);
         try {
-            // Simulate heavy processing (document validation, eligibility checks)
-            Thread.sleep(2000);
-            
+            Thread.sleep(2000); // Simulate document validation
             BenefitApplication app = applicationRepository.findById(applicationId).orElseThrow();
-            
-            // Simple rule check for demonstration
+
             if (app.getApplicant().getDisabilityPercentage() >= app.getBenefit().getMinDisabilityPercentage()) {
                 app.setStatus(ApplicationStatus.UNDER_REVIEW);
             } else {
                 app.setStatus(ApplicationStatus.REJECTED);
                 app.setRejectionReason("Does not meet minimum disability percentage requirement");
             }
-            
             applicationRepository.save(app);
-            
-            // Send update event
-            kafkaProducerService.sendApplicationEvent(ApplicationEvent.builder()
-                    .applicationId(app.getId())
-                    .referenceNumber(app.getReferenceNumber())
-                    .applicantId(app.getApplicant().getId())
-                    .eventType("APPLICATION_STATUS_UPDATED")
-                    .build());
 
+            // Kafka status event — non-fatal
+            try {
+                kafkaProducerService.sendApplicationEvent(ApplicationEvent.builder()
+                        .applicationId(app.getId())
+                        .referenceNumber(app.getReferenceNumber())
+                        .applicantId(app.getApplicant().getId())
+                        .eventType("APPLICATION_STATUS_UPDATED")
+                        .build());
+            } catch (Exception kafkaEx) {
+                log.warn("Kafka status update failed (non-fatal): {}", kafkaEx.getMessage());
+            }
         } catch (Exception e) {
             log.error("Error processing application {}", applicationId, e);
         }

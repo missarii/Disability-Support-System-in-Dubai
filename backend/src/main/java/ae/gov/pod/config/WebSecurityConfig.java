@@ -51,11 +51,14 @@ public class WebSecurityConfig {
         http.csrf(csrf -> csrf.disable())
             .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(auth -> 
+            .authorizeHttpRequests(auth ->
                 auth.requestMatchers("/api/auth/**").permitAll()
                     .requestMatchers("/api/public/**").permitAll()
+                    .requestMatchers("/api/benefits/**").permitAll()
                     .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()
                     .requestMatchers("/actuator/**").permitAll()
+                    // Serve React SPA — allow all static resources and root
+                    .requestMatchers("/", "/index.html", "/assets/**", "/*.png", "/*.ico", "/*.svg", "/*.js", "/*.css").permitAll()
                     .anyRequest().authenticated()
             );
         

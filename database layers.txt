@@ -1,0 +1,33 @@
+PostgreSQL → main system (source of truth)
+Redis      → fast cache
+ClickHouse → analytics engine
+
+---------------------------------------
+
+
+| System     | Role                             |
+| ---------- | -------------------------------- |
+| PostgreSQL | Stores actual money, users, bets |
+| Redis      | Fast temporary memory            |
+| ClickHouse | Business intelligence + reports  |
+
+
+✔ Analytics engine
+✔ Reporting database
+✔ Big data query system
+
+
+-------------------------------------------------
+
+
+Frontend
+   ↓
+API Gateway
+   ↓
+Microservices
+   ↓
+--------------------------------
+| PostgreSQL (MAIN DATABASE)   |
+| Redis (CACHE)                |
+| ClickHouse (ANALYTICS)       |
+--------------------------------

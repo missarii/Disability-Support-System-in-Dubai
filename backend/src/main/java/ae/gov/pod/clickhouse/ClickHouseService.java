@@ -8,7 +8,10 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import ae.gov.pod.event.ApplicationEvent;
 
 @Service
 @RequiredArgsConstructor
@@ -48,5 +51,23 @@ public class ClickHouseService {
         }
     }
     
-    // Additional methods for inserting events and querying analytics...
+    public void recordApplicationEvent(ApplicationEvent event) {
+        String insertSQL = "INSERT INTO system_events (event_id, event_type, user_id, reference_id, event_time, metadata) VALUES (?, ?, ?, ?, ?, ?)";
+        try (Connection conn = DriverManager.getConnection(url, username, password);
+             PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
+            
+            pstmt.setObject(1, java.util.UUID.randomUUID());
+            pstmt.setString(2, event.getEventType());
+            pstmt.setLong(3, event.getApplicantId() != null ? event.getApplicantId() : 0L);
+            pstmt.setString(4, event.getReferenceNumber());
+            pstmt.setTimestamp(5, new Timestamp(System.currentTimeMillis()));
+            pstmt.setString(6, "{\"applicationId\": " + event.getApplicationId() + "}");
+            
+            pstmt.executeUpdate();
+            log.info("Recorded event {} in ClickHouse for application {}", event.getEventType(), event.getReferenceNumber());
+            
+        } catch (Exception e) {
+            log.error("Failed to record event in ClickHouse: {}", e.getMessage());
+        }
+    }
 }

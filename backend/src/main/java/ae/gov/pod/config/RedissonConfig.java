@@ -20,7 +20,11 @@ public class RedissonConfig {
     public RedissonClient redissonClient() {
         Config config = new Config();
         config.useSingleServer()
-              .setAddress("redis://" + redisHost + ":" + redisPort);
+              .setAddress("redis://" + redisHost + ":" + redisPort)
+              .setConnectTimeout(1000)      // 1s connect timeout
+              .setTimeout(1000)            // 1s response timeout
+              .setRetryAttempts(0)         // no retries — fail fast
+              .setRetryInterval(500);
         return Redisson.create(config);
     }
 }

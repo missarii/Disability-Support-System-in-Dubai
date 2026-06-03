@@ -2,13 +2,13 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app
 # Copy package files first for caching
-COPY frontend/package*.json ./frontend/
-WORKDIR /app/frontend
+COPY backend/frontend/package*.json ./backend/frontend/
+WORKDIR /app/backend/frontend
 RUN npm install
 # Copy rest of frontend
-COPY frontend/ ./
+COPY backend/frontend/ ./
 # Ensure output directory exists for Vite build
-RUN mkdir -p ../backend/src/main/resources/static
+RUN mkdir -p ../src/main/resources/static
 RUN npm run build
 
 # Stage 2: Build Backend

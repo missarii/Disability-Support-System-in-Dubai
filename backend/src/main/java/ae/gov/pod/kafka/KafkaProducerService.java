@@ -15,6 +15,14 @@ public class KafkaProducerService {
 
     public void sendApplicationEvent(ApplicationEvent event) {
         log.info("Sending application event: {}", event);
-        kafkaTemplate.send("pod-application-events", event.getReferenceNumber(), event);
+        kafkaTemplate.send("pod-application-events", event.getReferenceNumber(), event)
+            .whenComplete((result, ex) -> {
+                if (ex != null) {
+                    log.warn("Kafka send failed for event {}: {}", event.getEventType(), ex.getMessage());
+                } else {
+                    log.debug("Kafka event sent successfully: {}", event.getEventType());
+                }
+            });
     }
 }
+
